@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="실시간 시스템 리소스 모니터링 대시보드 - CPU, 메모리, GPU, 네트워크 추적">
+    <title>🖥️ System Resource Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <div class="logo">
+                    <span class="logo-icon">🖥️</span>
+                    <h1>System Resource Monitor</h1>
+                </div>
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">연결 중...</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <div class="system-info" id="systemInfo">
+                    <span class="system-name">Loading...</span>
+                    <span class="uptime">Uptime: --</span>
+                </div>
+                <button class="btn btn-primary" id="pdfExportBtn">
+                    <span class="btn-icon">📄</span>
+                    5분 PDF 내보내기
+                </button>
+            </div>
+        </header>
+
+        <!-- PDF Progress Modal -->
+        <div class="modal-overlay" id="pdfModal">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2>📊 데이터 수집 중...</h2>
+                </div>
+                <div class="modal-body">
+                    <div class="progress-container">
+                        <div class="progress-bar" id="progressBar"></div>
+                    </div>
+                    <div class="progress-info">
+                        <span id="progressTime">0:00 / 5:00</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <p class="progress-description">5분간 시스템 데이터를 수집하여 PDF 보고서를 생성합니다.</p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" id="cancelPdfBtn">취소</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Dashboard -->
+        <main class="dashboard">
+            <!-- CPU Section -->
+            <section class="card card-cpu" id="cpuCard">
+                <div class="card-header">
+                    <h2><span class="card-icon">⚡</span> CPU</h2>
+                    <div class="card-stats">
+                        <span class="stat-temp" id="cpuTemp">-- °C</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="gauge-container">
+                        <div class="gauge" id="cpuGauge">
+                            <svg viewBox="0 0 100 50">
+                                <path class="gauge-bg" d="M 10 50 A 40 40 0 0 1 90 50" />
+                                <path class="gauge-fill" id="cpuGaugeFill" d="M 10 50 A 40 40 0 0 1 90 50" />
+                            </svg>
+                            <div class="gauge-value" id="cpuUsage">0%</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="cpuChart"></canvas>
+                    </div>
+                    <div class="cpu-cores" id="cpuCores"></div>
+                    <div class="info-row">
+                        <span class="info-label">주파수</span>
+                        <span class="info-value" id="cpuFreq">-- GHz</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">코어</span>
+                        <span class="info-value" id="cpuCoreCount">-- 코어</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Memory Section -->
+            <section class="card card-memory" id="memoryCard">
+                <div class="card-header">
+                    <h2><span class="card-icon">🧠</span> Memory</h2>
+                </div>
+                <div class="card-body">
+                    <div class="gauge-container">
+                        <div class="gauge" id="memoryGauge">
+                            <svg viewBox="0 0 100 50">
+                                <path class="gauge-bg" d="M 10 50 A 40 40 0 0 1 90 50" />
+                                <path class="gauge-fill" id="memoryGaugeFill" d="M 10 50 A 40 40 0 0 1 90 50" />
+                            </svg>
+                            <div class="gauge-value" id="memoryUsage">0%</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="memoryChart"></canvas>
+                    </div>
+                    <div class="memory-bar">
+                        <div class="memory-bar-fill" id="memoryBarFill"></div>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">사용 중</span>
+                        <span class="info-value" id="memoryUsed">-- GB</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">총 용량</span>
+                        <span class="info-value" id="memoryTotal">-- GB</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">가용</span>
+                        <span class="info-value" id="memoryAvailable">-- GB</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- GPU Section -->
+            <section class="card card-gpu" id="gpuCard">
+                <div class="card-header">
+                    <h2><span class="card-icon">🎮</span> GPU</h2>
+                    <div class="card-stats">
+                        <span class="stat-temp" id="gpuTemp">-- °C</span>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="gpu-name" id="gpuName">검색 중...</div>
+                    <div class="gauge-container">
+                        <div class="gauge" id="gpuGauge">
+                            <svg viewBox="0 0 100 50">
+                                <path class="gauge-bg" d="M 10 50 A 40 40 0 0 1 90 50" />
+                                <path class="gauge-fill" id="gpuGaugeFill" d="M 10 50 A 40 40 0 0 1 90 50" />
+                            </svg>
+                            <div class="gauge-value" id="gpuUsage">0%</div>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="gpuChart"></canvas>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">VRAM 사용</span>
+                        <span class="info-value" id="gpuVramUsed">-- GB</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">VRAM 총</span>
+                        <span class="info-value" id="gpuVramTotal">-- GB</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Network Section -->
+            <section class="card card-network" id="networkCard">
+                <div class="card-header">
+                    <h2><span class="card-icon">🌐</span> Network</h2>
+                </div>
+                <div class="card-body">
+                    <div class="network-stats">
+                        <div class="network-stat download">
+                            <span class="arrow">↓</span>
+                            <span class="speed" id="downloadSpeed">0.00</span>
+                            <span class="unit">Mbps</span>
+                        </div>
+                        <div class="network-stat upload">
+                            <span class="arrow">↑</span>
+                            <span class="speed" id="uploadSpeed">0.00</span>
+                            <span class="unit">Mbps</span>
+                        </div>
+                    </div>
+                    <div class="chart-container chart-network">
+                        <canvas id="networkChart"></canvas>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">총 수신</span>
+                        <span class="info-value" id="totalReceived">-- GB</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">총 송신</span>
+                        <span class="info-value" id="totalSent">-- GB</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Disk Section -->
+            <section class="card card-disk" id="diskCard">
+                <div class="card-header">
+                    <h2><span class="card-icon">💾</span> Disk</h2>
+                </div>
+                <div class="card-body">
+                    <div class="disk-io">
+                        <div class="io-stat">
+                            <span class="io-label">읽기</span>
+                            <span class="io-value" id="diskRead">0.00 MB/s</span>
+                        </div>
+                        <div class="io-stat">
+                            <span class="io-label">쓰기</span>
+                            <span class="io-value" id="diskWrite">0.00 MB/s</span>
+                        </div>
+                    </div>
+                    <div class="disk-partitions" id="diskPartitions">
+                        <!-- Partitions will be rendered here -->
+                    </div>
+                </div>
+            </section>
+
+            <!-- Steam Games Compatibility Section -->
+            <section class="card card-steam" id="steamCard">
+                <div class="card-header">
+                    <h2><span class="card-icon">🎮</span> Steam Top 10 게임 호환성</h2>
+                    <button class="btn btn-small" id="refreshSteamBtn">🔄 새로고침</button>
+                </div>
+                <div class="card-body">
+                    <div class="steam-specs" id="steamSpecs">
+                        <div class="spec-item">
+                            <span class="spec-label">CPU</span>
+                            <span class="spec-value" id="specCpu">--</span>
+                        </div>
+                        <div class="spec-item">
+                            <span class="spec-label">RAM</span>
+                            <span class="spec-value" id="specRam">-- GB</span>
+                        </div>
+                        <div class="spec-item">
+                            <span class="spec-label">GPU VRAM</span>
+                            <span class="spec-value" id="specVram">-- GB</span>
+                        </div>
+                        <div class="spec-item">
+                            <span class="spec-label">저장공간</span>
+                            <span class="spec-value" id="specStorage">-- GB</span>
+                        </div>
+                    </div>
+                    <div class="steam-table-container">
+                        <table class="steam-table" id="steamTable">
+                            <thead>
+                                <tr>
+                                    <th>게임</th>
+                                    <th>CPU</th>
+                                    <th>RAM</th>
+                                    <th>GPU</th>
+                                    <th>저장</th>
+                                    <th>상태</th>
+                                </tr>
+                            </thead>
+                            <tbody id="steamTableBody">
+                                <!-- Games will be rendered here -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>© 2026 System Resource Monitor | 실시간 시스템 모니터링</p>
+        </footer>
+    </div>
+
+    <script src="app.js"></script>
+    <script src="pdf-export.js"></script>
+</body>
+</html>
