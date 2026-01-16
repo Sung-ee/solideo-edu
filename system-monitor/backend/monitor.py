@@ -32,6 +32,12 @@ class SystemMonitor:
         self.last_net_io = psutil.net_io_counters()
         self.last_disk_io = psutil.disk_io_counters()
         self.last_time = time.time()
+
+        # Log if I/O counters are not available
+        if self.last_disk_io is None:
+            logger.warning("Disk I/O counters not available on this system")
+        if self.last_net_io is None:
+            logger.warning("Network I/O counters not available on this system")
         
         # Initialize WMI for temperature (Windows)
         self.wmi_client = None
@@ -120,20 +126,29 @@ class SystemMonitor:
         current_disk_io = psutil.disk_io_counters()
         current_time = time.time()
         time_delta = current_time - self.last_time
-        
-        if time_delta > 0:
-            read_speed = (current_disk_io.read_bytes - self.last_disk_io.read_bytes) / time_delta
-            write_speed = (current_disk_io.write_bytes - self.last_disk_io.write_bytes) / time_delta
-        else:
-            read_speed = 0
-            write_speed = 0
-        
+
+        read_speed = 0
+        write_speed = 0
+        total_read_gb = 0
+        total_write_gb = 0
+
+        if current_disk_io is not None and self.last_disk_io is not None:
+            if time_delta > 0:
+                read_speed = (current_disk_io.read_bytes - self.last_disk_io.read_bytes) / time_delta
+                write_speed = (current_disk_io.write_bytes - self.last_disk_io.write_bytes) / time_delta
+
+            total_read_gb = round(current_disk_io.read_bytes / (1024 ** 3), 2)
+            total_write_gb = round(current_disk_io.write_bytes / (1024 ** 3), 2)
+
+            # Update last_disk_io for next calculation
+            self.last_disk_io = current_disk_io
+
         return {
             "partitions": partitions,
-            "read_speed_mbps": round(read_speed / (1024 ** 2), 2),
-            "write_speed_mbps": round(write_speed / (1024 ** 2), 2),
-            "total_read_gb": round(current_disk_io.read_bytes / (1024 ** 3), 2),
-            "total_write_gb": round(current_disk_io.write_bytes / (1024 ** 3), 2)
+            "read_speed_mbps": round(read_speed / (1024 ** 2), 2) if read_speed > 0 else 0,
+            "write_speed_mbps": round(write_speed / (1024 ** 2), 2) if write_speed > 0 else 0,
+            "total_read_gb": total_read_gb,
+            "total_write_gb": total_write_gb
         }
 
     def get_network_info(self) -> Dict[str, Any]:
@@ -141,44 +156,58 @@ class SystemMonitor:
         current_net_io = psutil.net_io_counters()
         current_time = time.time()
         time_delta = current_time - self.last_time
-        
-        if time_delta > 0:
-            download_speed = (current_net_io.bytes_recv - self.last_net_io.bytes_recv) / time_delta
-            upload_speed = (current_net_io.bytes_sent - self.last_net_io.bytes_sent) / time_delta
-        else:
-            download_speed = 0
-            upload_speed = 0
-        
-        # Update last values
-        self.last_net_io = current_net_io
+
+        download_speed = 0
+        upload_speed = 0
+        total_received_gb = 0
+        total_sent_gb = 0
+        packets_recv = 0
+        packets_sent = 0
+
+        if current_net_io is not None and self.last_net_io is not None:
+            if time_delta > 0:
+                download_speed = (current_net_io.bytes_recv - self.last_net_io.bytes_recv) / time_delta
+                upload_speed = (current_net_io.bytes_sent - self.last_net_io.bytes_sent) / time_delta
+
+            total_received_gb = round(current_net_io.bytes_recv / (1024 ** 3), 2)
+            total_sent_gb = round(current_net_io.bytes_sent / (1024 ** 3), 2)
+            packets_recv = current_net_io.packets_recv
+            packets_sent = current_net_io.packets_sent
+
+            # Update last values
+            self.last_net_io = current_net_io
+
         self.last_time = current_time
-        
+
         # Get network interfaces
         interfaces = []
-        addrs = psutil.net_if_addrs()
-        stats = psutil.net_if_stats()
-        
-        for name, addresses in addrs.items():
-            if name in stats:
-                is_up = stats[name].isup
-                speed = stats[name].speed
-                for addr in addresses:
-                    if addr.family.name == 'AF_INET':
-                        interfaces.append({
-                            "name": name,
-                            "ip": addr.address,
-                            "is_up": is_up,
-                            "speed_mbps": speed
-                        })
-                        break
-        
+        try:
+            addrs = psutil.net_if_addrs()
+            stats = psutil.net_if_stats()
+
+            for name, addresses in addrs.items():
+                if name in stats:
+                    is_up = stats[name].isup
+                    speed = stats[name].speed
+                    for addr in addresses:
+                        if addr.family.name == 'AF_INET':
+                            interfaces.append({
+                                "name": name,
+                                "ip": addr.address,
+                                "is_up": is_up,
+                                "speed_mbps": speed
+                            })
+                            break
+        except (AttributeError, OSError) as e:
+            logger.debug(f"Error getting network interfaces: {e}")
+
         return {
-            "download_speed_mbps": round(download_speed * 8 / (1024 ** 2), 2),
-            "upload_speed_mbps": round(upload_speed * 8 / (1024 ** 2), 2),
-            "total_received_gb": round(current_net_io.bytes_recv / (1024 ** 3), 2),
-            "total_sent_gb": round(current_net_io.bytes_sent / (1024 ** 3), 2),
-            "packets_recv": current_net_io.packets_recv,
-            "packets_sent": current_net_io.packets_sent,
+            "download_speed_mbps": round(download_speed * 8 / (1024 ** 2), 2) if download_speed > 0 else 0,
+            "upload_speed_mbps": round(upload_speed * 8 / (1024 ** 2), 2) if upload_speed > 0 else 0,
+            "total_received_gb": total_received_gb,
+            "total_sent_gb": total_sent_gb,
+            "packets_recv": packets_recv,
+            "packets_sent": packets_sent,
             "interfaces": interfaces
         }
 
