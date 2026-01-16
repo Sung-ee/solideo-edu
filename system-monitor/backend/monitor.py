@@ -6,8 +6,11 @@ Collects CPU, Memory, Disk, Network, and GPU information
 import psutil
 import platform
 import time
+import logging
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
 
 # GPU monitoring
 try:
@@ -35,10 +38,14 @@ class SystemMonitor:
         if WMI_AVAILABLE and platform.system() == "Windows":
             try:
                 self.wmi_client = wmi.WMI(namespace="root\\OpenHardwareMonitor")
-            except Exception:
+                logger.info("WMI connected to OpenHardwareMonitor namespace")
+            except (ConnectionError, PermissionError) as e:
+                logger.warning(f"Failed to connect to OpenHardwareMonitor: {e}")
                 try:
                     self.wmi_client = wmi.WMI(namespace="root\\wmi")
-                except Exception:
+                    logger.info("WMI connected to root\\wmi namespace")
+                except (ConnectionError, PermissionError) as e:
+                    logger.warning(f"Failed to connect to WMI: {e}")
                     self.wmi_client = None
 
     def get_cpu_info(self) -> Dict[str, Any]:
@@ -58,8 +65,10 @@ class SystemMonitor:
                     if sensor.SensorType == "Temperature" and "CPU" in sensor.Name:
                         cpu_temp = float(sensor.Value)
                         break
-            except Exception:
-                pass
+            except (AttributeError, TypeError, ValueError) as e:
+                logger.debug(f"Failed to read CPU temperature: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error reading CPU temperature: {e}")
         
         return {
             "usage_percent": cpu_percent,
@@ -196,8 +205,10 @@ class SystemMonitor:
                         "temperature": gpu.temperature,
                         "driver": gpu.driver
                     })
-            except Exception:
-                pass
+            except (RuntimeError, AttributeError) as e:
+                logger.warning(f"GPUtil error: {e}")
+            except Exception as e:
+                logger.error(f"Unexpected error in GPUtil: {e}")
         
         # Use WMI to detect ALL GPUs including Intel ARC and AMD
         if WMI_AVAILABLE and platform.system() == "Windows":
@@ -249,9 +260,11 @@ class SystemMonitor:
                         gpu_info = self._get_intel_gpu_stats(gpu_info)
                     
                     gpus.append(gpu_info)
-                    
+
+            except (ConnectionError, AttributeError) as e:
+                logger.warning(f"WMI GPU detection error: {e}")
             except Exception as e:
-                print(f"WMI GPU detection error: {e}")
+                logger.error(f"Unexpected error in WMI GPU detection: {e}")
         
         return gpus
     

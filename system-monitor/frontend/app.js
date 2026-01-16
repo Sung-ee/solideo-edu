@@ -19,6 +19,11 @@ class SystemMonitor {
         this.collectedData = []; // For PDF export
         this.isCollecting = false;
 
+        // WebSocket reconnection settings
+        this.wsRetryCount = 0;
+        this.wsMaxRetries = 5;
+        this.wsBaseDelay = 1000; // 1 second
+
         this.init();
     }
 
@@ -43,30 +48,49 @@ class SystemMonitor {
 
         this.ws.onopen = () => {
             console.log('WebSocket connected');
+            this.wsRetryCount = 0; // Reset retry count on successful connection
             this.updateConnectionStatus('connected');
         };
 
         this.ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            this.updateDashboard(data);
+            try {
+                const data = JSON.parse(event.data);
+                this.updateDashboard(data);
 
-            // Store data for PDF export if collecting
-            if (this.isCollecting) {
-                this.collectedData.push(data);
+                // Store data for PDF export if collecting
+                if (this.isCollecting) {
+                    this.collectedData.push(data);
+                }
+            } catch (error) {
+                console.error('Error parsing WebSocket message:', error);
             }
         };
 
         this.ws.onclose = () => {
             console.log('WebSocket disconnected');
             this.updateConnectionStatus('disconnected');
-            // Attempt to reconnect after 3 seconds
-            setTimeout(() => this.connectWebSocket(), 3000);
+            this.attemptReconnect();
         };
 
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
             this.updateConnectionStatus('error');
         };
+    }
+
+    attemptReconnect() {
+        if (this.wsRetryCount >= this.wsMaxRetries) {
+            console.error('Maximum WebSocket reconnection attempts reached');
+            this.updateConnectionStatus('error');
+            return;
+        }
+
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s
+        const delay = this.wsBaseDelay * Math.pow(2, this.wsRetryCount);
+        this.wsRetryCount++;
+
+        console.log(`Attempting to reconnect WebSocket (attempt ${this.wsRetryCount}/${this.wsMaxRetries}) in ${delay}ms`);
+        setTimeout(() => this.connectWebSocket(), delay);
     }
 
     updateConnectionStatus(status) {

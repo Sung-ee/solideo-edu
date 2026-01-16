@@ -5,6 +5,7 @@ Real-time system monitoring with WebSocket support
 
 import asyncio
 import json
+import logging
 from pathlib import Path
 from typing import List
 
@@ -16,6 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from monitor import monitor
 from steam_checker import check_game_compatibility, get_games_list
 
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="System Resource Monitor",
     description="Real-time system resource monitoring API",
@@ -25,10 +33,15 @@ app = FastAPI(
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://localhost:3000",
+        "http://127.0.0.1:8000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 # Serve frontend static files
@@ -54,9 +67,13 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
-            except Exception:
+            except (WebSocketDisconnect, RuntimeError) as e:
+                logger.debug(f"Connection disconnected during broadcast: {e}")
                 disconnected.append(connection)
-        
+            except Exception as e:
+                logger.error(f"Unexpected error during broadcast: {e}", exc_info=True)
+                disconnected.append(connection)
+
         for conn in disconnected:
             self.disconnect(conn)
 
@@ -150,17 +167,24 @@ async def get_steam_compatibility():
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time monitoring"""
     await manager.connect(websocket)
-    
+    logger.info("Client connected to WebSocket")
+
     try:
         while True:
             # Send system stats every second
-            stats = monitor.get_all_stats()
-            await websocket.send_text(json.dumps(stats))
+            try:
+                stats = monitor.get_all_stats()
+                await websocket.send_text(json.dumps(stats))
+            except (RuntimeError, ValueError) as e:
+                logger.warning(f"Error serializing stats: {e}")
+                continue
+
             await asyncio.sleep(1)
     except WebSocketDisconnect:
+        logger.info("Client disconnected from WebSocket")
         manager.disconnect(websocket)
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.error(f"WebSocket error: {e}", exc_info=True)
         manager.disconnect(websocket)
 
 
